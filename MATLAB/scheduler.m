@@ -1,75 +1,122 @@
-% 1. Load the dataset from the CSV file
-data = readtable('5g_qos_traffic_data.csv');
-
-% Extract the relevant columns
-time = data.time;                % Packet arrival times
-packet_size = data.packet_size;   % Packet sizes
-qos_class = data.qos_class;       % QoS classes (uRLLC, eMBB, mMTC)
-
-% 2. Define the Scheduling Algorithm
-% Define a mapping for QoS priority (uRLLC > eMBB > mMTC)
-qos_priority = containers.Map({'uRLLC', 'eMBB', 'mMTC'}, [1, 2, 3]);
-
-% Convert the QoS class into priority values
-priority = cell2mat(values(qos_priority, qos_class));
-
-% Combine time and priority into a matrix to sort
-packet_info = [priority, time];
-
-% Sort packets based on priority first and then by time
-[~, sorted_idx] = sortrows(packet_info, [1 2]);
-
-% Get sorted packet information
-sorted_time = time(sorted_idx);
-sorted_packet_size = packet_size(sorted_idx);
-sorted_qos_class = qos_class(sorted_idx);
-
-% Display the sorted data
-disp('Sorted packet schedule:');
-for i = 1:length(sorted_time)
-    fprintf('Time: %.2f, Packet Size: %d, QoS: %s\n', sorted_time(i), sorted_packet_size(i), sorted_qos_class{i});
-end
-
-% 3. Simulate Packet Transmission
-% Define processing rate (in bits per second)
-processing_rate = 1e6;  % 1 Mbps
-
-% Initialize simulation variables
-current_time = 0;   % The time in the simulation
-processed_packets = {};  % Store results
-
-% Process each packet
-for i = 1:length(sorted_time)
-    % Wait until the packet arrives
-    if sorted_time(i) > current_time
-        current_time = sorted_time(i);
+% Load packets from CSV file
+function packets = load_packets_from_csv(filename)
+    packets = {};
+    fid = fopen(filename, 'r');
+    if fid == -1
+        error('File cannot be opened: %s', filename);
     end
-    
-    % Calculate the processing time for the packet (size / rate)
-    processing_time = sorted_packet_size(i) * 8 / processing_rate;  % Convert bytes to bits
-    
-    % Process the packet
-    fprintf('Processing packet: Time %.2f, Size %d, QoS %s\n', ...
-        current_time, sorted_packet_size(i), sorted_qos_class{i});
-    
-    % Log the result
-    processed_packets{end+1} = sprintf('Packet processed: Start Time %.2f, End Time %.2f, Size %d, QoS %s', ...
-        current_time, current_time + processing_time, sorted_packet_size(i), sorted_qos_class{i});
-    
-    % Update current time after processing
-    current_time = current_time + processing_time;
+    header = fgetl(fid);  % Read header line
+    while ~feof(fid)
+        line = fgetl(fid);
+        data = strsplit(line, ',');
+        packet = struct();
+        packet.timestamp = datetime(data{1}, 'InputFormat', 'yyyy-MM-dd HH:mm:ss');
+        packet.source_ip = data{2};
+        packet.destination_ip = data{3};
+        packet.protocol = data{4};
+        packet.packet_size = str2double(data{5});
+        packet.qos_class = data{6};
+        packets{end+1} = packet;  % Append packet struct to the list
+    end
+    fclose(fid);
 end
 
-% 4. Save Simulation Results to a File
-output_file = 'simulation_results.txt';
-fileID = fopen(output_file, 'w');
+% Function to process packets
+function process_packets(packets, TIME_SLOT)
+    urllc_queue = {};  % uRLLC packets queue
+    embb_queue = {};   % eMBB packets queue
+    mmtc_queue = {};   % mMTC packets queue
+    output_log = {};   % List to store output for logging
 
-% Write the simulation results to the file
-for i = 1:length(processed_packets)
-    fprintf(fileID, '%s\n', processed_packets{i});
+    % Add packets to respective queues
+    for i = 1:length(packets)
+        packet = packets{i};
+        if strcmp(packet.qos_class, 'uRLLC')
+            urllc_queue{end+1} = packet;  % All uRLLC packets processed
+        elseif strcmp(packet.qos_class, 'eMBB')
+            embb_queue{end+1} = packet;
+        else
+            mmtc_queue{end+1} = packet;
+        end
+    end
+
+    % Process packets
+    while ~isempty(urllc_queue) || ~isempty(embb_queue) || ~isempty(mmtc_queue)
+        % Process uRLLC packets first
+        while ~isempty(urllc_queue)
+            packet = urllc_queue{1};  % Get first packet
+            urllc_queue(1) = [];       % Remove it from the queue
+            message = sprintf('Processing uRLLC Packet: %s -> %s', packet.source_ip, packet.destination_ip);
+            disp(message);              % Display to console
+            output_log{end+1} = message;  % Store in output log
+        end
+
+        % Process eMBB packets
+        while ~isempty(embb_queue)
+            packet = embb_queue{1};  % Get first packet
+            embb_queue(1) = [];       % Remove it from the queue
+            deadline = datetime('now') + seconds(0.2);  % 200 ms for eMBB
+            if datetime('now') <= deadline
+                message = sprintf('Processing eMBB Packet: %s -> %s', packet.source_ip, packet.destination_ip);
+                disp(message);              % Display to console
+                output_log{end+1} = message;  % Store in output log
+            else
+                message = sprintf('eMBB Packet dropped due to deadline miss: %s -> %s', packet.source_ip, packet.destination_ip);
+                disp(message);              % Display to console
+                output_log{end+1} = message;  % Store in output log
+            end
+        end
+
+        % Process mMTC packets
+        while ~isempty(mmtc_queue)
+            packet = mmtc_queue{1};  % Get first packet
+            mmtc_queue(1) = [];       % Remove it from the queue
+            deadline = datetime('now') + seconds(0.2);  % 200 ms for mMTC
+            if datetime('now') <= deadline
+                message = sprintf('Processing mMTC Packet: %s -> %s', packet.source_ip, packet.destination_ip);
+                disp(message);              % Display to console
+                output_log{end+1} = message;  % Store in output log
+            else
+                message = sprintf('mMTC Packet dropped due to deadline miss: %s -> %s', packet.source_ip, packet.destination_ip);
+                disp(message);              % Display to console
+                output_log{end+1} = message;  % Store in output log
+            end
+        end
+
+        % Wait for the next time slot
+        pause(TIME_SLOT);
+    end
+
+    % Write log to file
+    write_output_to_file(output_log);
 end
 
-% Close the file
-fclose(fileID);
+% Function to write output to file
+function write_output_to_file(output_log)
+    fid = fopen('scheduler_output.txt', 'w');
+    if fid == -1
+        error('Cannot open file for writing.');
+    end
+    for i = 1:length(output_log)
+        fprintf(fid, '%s\n', output_log{i});
+    end
+    fclose(fid);
+    fprintf('Simulation complete. Results saved to scheduler_output.txt\n');
+end
 
-disp(['Simulation complete. Results saved to ', output_file]);
+% Main function
+function main()
+    % Constants
+    LATENCY_THRESHOLD_URLLC = 0.005;  % 5 ms threshold for uRLLC packets
+    TIME_SLOT = 0.1;                   % Scheduler time slot (100 ms)
+    OUTPUT_FILE = "scheduler_output.txt";  % File to store output
+
+    % Load packets from the CSV file
+    packets = load_packets_from_csv('/home/aditya/UpgradScheduler/Dataset/5g_network_traffic.csv');
+    
+    % Start processing the packets
+    process_packets(packets, TIME_SLOT);  % Pass TIME_SLOT as an argument
+end
+
+% Call the main function
+main();
