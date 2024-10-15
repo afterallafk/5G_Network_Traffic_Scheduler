@@ -5,8 +5,9 @@ import time
 from datetime import datetime, timedelta
 
 # Constants
-LATENCY_THRESHOLD_URLLC = 0.001  # 1 ms threshold for uRLLC packets
+LATENCY_THRESHOLD_URLLC = 0.005  # 5 ms threshold for uRLLC packets
 TIME_SLOT = 0.1  # Scheduler time slot (100 ms)
+OUTPUT_FILE = "scheduler_output.txt"  # File to store output
 
 # Class to represent a packet
 class Packet:
@@ -21,63 +22,70 @@ class Packet:
         self.deadline = self.calculate_deadline()
 
     def calculate_deadline(self):
+        # Set a larger deadline for non-uRLLC packets
         if self.qos_class == "uRLLC":
-            return self.arrival_time + timedelta(seconds=LATENCY_THRESHOLD_URLLC)
+            # No deadline check for uRLLC; all packets will be processed
+            return None
         else:
-            # Use a larger deadline for non-uRLLC packets
-            return self.arrival_time + timedelta(seconds=TIME_SLOT)
-
-# Priority queue comparator for Packet based on deadline
-def packet_priority(packet):
-    if packet.qos_class == "uRLLC":
-        return 1  # High priority
-    elif packet.qos_class == "eMBB":
-        return 2  # Medium priority
-    else:
-        return 3  # Low priority
+            # Use a larger deadline for eMBB and mMTC packets
+            return self.arrival_time + timedelta(seconds=0.2)  # 200 ms for eMBB
 
 # Scheduler class
 class Scheduler:
     def __init__(self):
-        self.urllc_queue = queue.PriorityQueue()
-        self.embb_queue = queue.Queue()
-        self.mmtc_queue = queue.Queue()
+        self.urllc_queue = queue.Queue()  # uRLLC packets queue (no priority)
+        self.embb_queue = queue.Queue()    # eMBB packets queue
+        self.mmtc_queue = queue.Queue()    # mMTC packets queue
+        self.output_log = []  # List to store output for logging
 
     def add_packet(self, packet):
         if packet.qos_class == "uRLLC":
-            # Add uRLLC packet to Priority Queue with deadlines
-            self.urllc_queue.put((packet.deadline, packet))
+            self.urllc_queue.put(packet)  # All uRLLC packets are processed without deadlines
         elif packet.qos_class == "eMBB":
             self.embb_queue.put(packet)
         else:
             self.mmtc_queue.put(packet)
 
+    def log_output(self, message):
+        print(message)  # Print to console
+        self.output_log.append(message)  # Store in output log
+
     def process_packets(self):
-        # Open a text file to store the output
-        with open("scheduler_output.txt", "w") as output_file:
-            while not self.urllc_queue.empty() or not self.embb_queue.empty() or not self.mmtc_queue.empty():
-                # Process uRLLC packets first
-                if not self.urllc_queue.empty():
-                    deadline, packet = self.urllc_queue.get()
-                    if datetime.now() <= deadline:
-                        output_message = f"Processing uRLLC Packet: {packet.source_ip} -> {packet.destination_ip}\n"
-                    else:
-                        output_message = f"uRLLC Packet dropped due to deadline miss: {packet.source_ip} -> {packet.destination_ip}\n"
-                # Process eMBB packets next
-                elif not self.embb_queue.empty():
-                    packet = self.embb_queue.get()
-                    output_message = f"Processing eMBB Packet: {packet.source_ip} -> {packet.destination_ip}\n"
-                # Process mMTC packets last
-                elif not self.mmtc_queue.empty():
-                    packet = self.mmtc_queue.get()
-                    output_message = f"Processing mMTC Packet: {packet.source_ip} -> {packet.destination_ip}\n"
+        while not self.urllc_queue.empty() or not self.embb_queue.empty() or not self.mmtc_queue.empty():
+            # Process uRLLC packets first (all will be processed)
+            while not self.urllc_queue.empty():
+                packet = self.urllc_queue.get()
+                self.log_output(f"Processing uRLLC Packet: {packet.source_ip} -> {packet.destination_ip}")
 
-                # Print the output to console and write to file
-                print(output_message.strip())
-                output_file.write(output_message)
+            # Then process eMBB packets
+            while not self.embb_queue.empty():
+                packet = self.embb_queue.get()
+                # Check deadline
+                if datetime.now() <= packet.deadline:
+                    self.log_output(f"Processing eMBB Packet: {packet.source_ip} -> {packet.destination_ip}")
+                else:
+                    self.log_output(f"eMBB Packet dropped due to deadline miss: {packet.source_ip} -> {packet.destination_ip}")
 
-                # Wait for the next time slot
-                time.sleep(TIME_SLOT)
+            # Then process mMTC packets
+            while not self.mmtc_queue.empty():
+                packet = self.mmtc_queue.get()
+                # Check deadline
+                if datetime.now() <= packet.deadline:
+                    self.log_output(f"Processing mMTC Packet: {packet.source_ip} -> {packet.destination_ip}")
+                else:
+                    self.log_output(f"mMTC Packet dropped due to deadline miss: {packet.source_ip} -> {packet.destination_ip}")
+
+            # Wait for the next time slot
+            time.sleep(TIME_SLOT)
+
+        # After processing, write log to file
+        self.write_output_to_file()
+
+    def write_output_to_file(self):
+        with open(OUTPUT_FILE, "w") as f:
+            for line in self.output_log:
+                f.write(f"{line}\n")  # Write each log entry on a new line
+        print(f"Output written to {OUTPUT_FILE}")
 
 # Function to load packets from CSV file
 def load_packets_from_csv(filename):
