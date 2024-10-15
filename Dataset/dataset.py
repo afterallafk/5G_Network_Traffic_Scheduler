@@ -1,36 +1,59 @@
-import numpy as np
-import pandas as pd
+import csv
+import random
+from datetime import datetime, timedelta
 
-# uRLLC parameters
-packet_size_mean = 200  # Bytes
-inter_arrival_time_mean = 0.001  # 1 ms
+# Define constants
+PROTOCOLS = ["TCP", "UDP", "ICMP"]
+QOS_CLASSES = ["eMBB", "uRLLC", "mMTC"]
+SOURCE_IP_PREFIX = "192.168.1."
+DEST_IP_PREFIX = "10.0.0."
 
-# Generate 100000 packets with exponential distribution
-urrlc_packet_sizes = np.random.exponential(packet_size_mean, 100000)
-urrlc_inter_arrival_times = np.random.exponential(inter_arrival_time_mean, 100000)
+# Function to generate random IP addresses
+def generate_ip(prefix):
+    return f"{prefix}{random.randint(1, 254)}"
 
-# eMBB parameters
-packet_size_mean = 1500  # Bytes
-inter_arrival_time_mean = 0.05  # 50 ms
+# Function to generate a random packet size (in bytes)
+def generate_packet_size():
+    return random.randint(100, 1500)  # Typical packet sizes
 
-# Generate 100000 packets
-embb_packet_sizes = np.random.exponential(packet_size_mean, 100000)
-embb_inter_arrival_times = np.random.exponential(inter_arrival_time_mean, 100000)
+# Function to generate random timestamps
+def generate_timestamps(start, count):
+    current_time = start
+    timestamps = []
+    for _ in range(count):
+        timestamps.append(current_time)
+        # Increment by random seconds
+        current_time += timedelta(seconds=random.randint(1, 5))
+    return timestamps
 
-# mMTC parameters
-packet_size_mean = 50  # Bytes
-inter_arrival_time_mean = 1  # 1 second
+# Function to create a 5G traffic dataset
+def create_5g_traffic_dataset(filename, num_entries):
+    # Start time for the dataset
+    start_time = datetime.now()
 
-# Generate 100000 packets
-mmtc_packet_sizes = np.random.exponential(packet_size_mean, 100000)
-mmtc_inter_arrival_times = np.random.exponential(inter_arrival_time_mean, 100000)
+    # Generate random timestamps
+    timestamps = generate_timestamps(start_time, num_entries)
 
-# Combine all data into one dataframe
-data = {
-    "time": np.cumsum(np.concatenate([urrlc_inter_arrival_times, embb_inter_arrival_times, mmtc_inter_arrival_times])),
-    "packet_size": np.concatenate([urrlc_packet_sizes, embb_packet_sizes, mmtc_packet_sizes]),
-    "qos_class": ['uRLLC'] * 100000 + ['eMBB'] * 100000 + ['mMTC'] * 100000
-}
+    # Open CSV file for writing
+    with open(filename, mode='w', newline='') as file:
+        writer = csv.writer(file)
+        # Write header
+        writer.writerow(["Timestamp", "Source IP", "Destination IP", "Protocol", "Packet Size (Bytes)", "QoS Class"])
 
-df = pd.DataFrame(data)
-df.to_csv("5g_qos_traffic_data.csv", index=False)
+        # Write random data entries
+        for i in range(num_entries):
+            timestamp = timestamps[i].strftime("%Y-%m-%d %H:%M:%S")
+            source_ip = generate_ip(SOURCE_IP_PREFIX)
+            destination_ip = generate_ip(DEST_IP_PREFIX)
+            protocol = random.choice(PROTOCOLS)
+            packet_size = generate_packet_size()
+            qos_class = random.choice(QOS_CLASSES)
+
+            # Write row to CSV
+            writer.writerow([timestamp, source_ip, destination_ip, protocol, packet_size, qos_class])
+
+    print(f"Dataset '{filename}' created successfully with {num_entries} entries.")
+
+# Example usage: Adjust the number of entries as needed
+num_entries = int(input("Enter the number of entries for the dataset: "))
+create_5g_traffic_dataset("5g_network_traffic.csv", num_entries)
